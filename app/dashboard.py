@@ -353,6 +353,13 @@ with tab2:
     st.markdown("### 📊 Model Performance on Held-Out Test Set")
     metrics_path = Path(__file__).resolve().parents[1] / "models" / "risk_model.joblib"
     
+    if not metrics_path.exists():
+        try:
+            from app.model import load_model
+            load_model()
+        except Exception:
+            pass
+
     if metrics_path.exists():
         bundle = joblib.load(metrics_path)
         m = bundle["metrics"]
