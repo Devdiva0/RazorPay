@@ -7,7 +7,9 @@ MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "risk_model.joblib
 
 def load_model():
     if not MODEL_PATH.exists():
-        raise FileNotFoundError("Model not found. Run: python -m app.train")
+        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        from .train import main as train_main
+        train_main()
     return joblib.load(MODEL_PATH)
 
 def explain(model, frame: pd.DataFrame, probability: float) -> list[str]:

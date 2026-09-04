@@ -233,12 +233,60 @@ with tab1:
             "prior_chargebacks": chargebacks, "payment_method": method
         }
 
+        res = None
         try:
             with st.spinner("Connecting to Risk Engine..."):
-                r = requests.post(f"{API_URL}/score", json=payload, timeout=5)
+                r = requests.post(f"{API_URL}/score", json=payload, timeout=3)
                 r.raise_for_status()
                 res = r.json()
+        except Exception as err:
+            # Fallback to direct Python engine (ideal for standalone Streamlit Cloud)
+            try:
+                from app.features import make_frame
+                from app.model import load_model, explain
+                from app.rules import rule_score
 
+                frame = make_frame(payload)
+                model = load_model()["pipeline"]
+                probability = float(model.predict_proba(frame)[:, 1][0])
+                rs, hits = rule_score(payload)
+
+                final_score = min(100.0, 0.75 * probability * 100 + 0.25 * rs)
+                if rs >= 70:
+                    final_score = max(final_score, 70.0)
+
+                if final_score >= 70:
+                    decision = "HIGH"
+                    action = "BLOCK_OR_MANUAL_REVIEW"
+                elif final_score >= 40:
+                    decision = "WATCH"
+                    action = "STEP_UP_VERIFICATION"
+                else:
+                    decision = "SAFE"
+                    action = "ALLOW"
+
+                reasons = explain(model, frame, probability)
+                reasons.extend(h["reason"] for h in hits)
+                reasons = list(dict.fromkeys(reasons))[:7]
+
+                res = {
+                    "risk_score": round(final_score, 2),
+                    "decision": decision,
+                    "recommended_action": action,
+                    "model_probability": round(probability, 4),
+                    "rule_score": round(rs, 2),
+                    "rule_hits": hits,
+                    "reasons": reasons,
+                    "audit": {
+                        "model": "logistic_regression_v1",
+                        "policy": "hybrid_ml_rules_v1 (In-Memory Engine)",
+                        "human_review_required": decision != "SAFE"
+                    }
+                }
+            except Exception as e2:
+                st.error(f"❌ Error reaching Risk Engine: {err} | Fallback Error: {e2}")
+
+        if res:
             st.markdown("---")
             st.markdown("## 🔍 Risk Score Result")
 
@@ -299,9 +347,6 @@ with tab1:
 
             with st.expander("🛠️ Audit & Governance Trace"):
                 st.json(res["audit"])
-
-        except Exception as err:
-            st.error(f"❌ Error reaching Risk Engine API: {err}")
 
 # TAB 2: MODEL METRICS & COST EVALUATION
 with tab2:
